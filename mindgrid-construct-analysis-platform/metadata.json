@@ -1,0 +1,8 @@
+{
+  "name": "Repertory Grid Explorer",
+  "description": "An interactive web application based on George Kelly's Personal Construct Psychology to help users extract their cognitive constructs and analyze internal psychological conflicts.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
