@@ -1,111 +1,95 @@
-import React, { createContext, useContext, useState, ReactNode } from "react";
-import { SessionData, Element, Construct, Ratings } from "./types";
-import { generateId } from "./lib/utils";
-
-interface SessionContextType {
-  data: SessionData;
-  setTheme: (theme: string) => void;
-  setMode: (mode: "concise" | "guided") => void;
-  addElement: (name: string, isCustom?: boolean) => void;
-  removeElement: (id: string) => void;
-  addConstruct: (left: string, right: string) => void;
-  removeConstruct: (id: string) => void;
-  setRating: (constructId: string, elementId: string, score: number) => void;
-  resetSession: () => void;
+import React, {
+  createContext,
+  useContext,
+  useEffect,
+  useState,
+  type ReactNode,
+} from "react";
+import type { SessionData } from "./types";
+import { freshSession, parseSession, STORAGE_KEY } from "./lib/session";
+function initial() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    return {
+      data: raw ? parseSession(raw) : freshSession(),
+      persist: !!raw,
+      error: "",
+    };
+  } catch {
+    return {
+      data: freshSession(),
+      persist: false,
+      error: "无法读取已保存的会话；原记录未被覆盖。可尝试导入备份文件。",
+    };
+  }
 }
-
-const defaultElements: Element[] = [
-  { id: "e_real_self", name: "现实自我", isCustom: false },
-  { id: "e_ideal_self", name: "理想自我", isCustom: false },
-];
-
-const defaultData: SessionData = {
-  theme: "",
-  mode: "concise",
-  elements: [...defaultElements],
-  constructs: [],
-  ratings: {},
-};
-
-const SessionContext = createContext<SessionContextType | undefined>(undefined);
-
+const SessionContext = createContext<{
+  data: SessionData;
+  update: (fn: (d: SessionData) => SessionData) => void;
+  replace: (d: SessionData) => void;
+  persist: boolean;
+  setPersist: (v: boolean) => void;
+  saveStatus: string;
+  reset: () => void;
+} | null>(null);
 export function SessionProvider({ children }: { children: ReactNode }) {
-  const [data, setData] = useState<SessionData>(defaultData);
-
-  const setTheme = (theme: string) => setData((d) => ({ ...d, theme }));
-  const setMode = (mode: "concise" | "guided") => setData((d) => ({ ...d, mode }));
-
-  const addElement = (name: string, isCustom = true) => {
-    setData((d) => {
-      // Prevent duplicates by name
-      if (d.elements.find(e => e.name === name)) return d;
-      const newEl = { id: generateId(), name, isCustom };
-      return { ...d, elements: [...d.elements, newEl] };
-    });
+  const [boot] = useState(initial),
+    [data, setData] = useState(boot.data),
+    [persist, setPersistValue] = useState(boot.persist);
+  const [saveStatus, setSaveStatus] = useState(
+    boot.error || (boot.persist ? "已恢复本地会话" : "本次会话不保留"),
+  );
+  const update = (fn: (d: SessionData) => SessionData) =>
+    setData((d) => ({ ...fn(d), updatedAt: new Date().toISOString() }));
+  useEffect(() => {
+    if (!persist) return;
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+      setSaveStatus("已保存到此浏览器");
+    } catch {
+      setSaveStatus("本地保存失败，请导出会话备份");
+    }
+  }, [data, persist]);
+  useEffect(() => {
+    const warn = (e: BeforeUnloadEvent) => {
+      if (!persist && (data.theme || data.constructs.length)) {
+        e.preventDefault();
+        e.returnValue = "";
+      }
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [persist, data.theme, data.constructs.length]);
+  const setPersist = (v: boolean) => {
+    if (!v) {
+      try {
+        localStorage.removeItem(STORAGE_KEY);
+      } catch {
+        setSaveStatus("未能删除浏览器副本，请在浏览器中清除此站点数据");
+        return;
+      }
+    }
+    setPersistValue(v);
+    setSaveStatus(v ? "正在保存…" : "本次会话不保留");
   };
-
-  const removeElement = (id: string) => {
-    setData((d) => ({
-      ...d,
-      elements: d.elements.filter((e) => e.id !== id || e.isCustom === false),
-    }));
-  };
-
-  const addConstruct = (left: string, right: string) => {
-    setData((d) => ({
-      ...d,
-      constructs: [...d.constructs, { id: generateId(), leftPole: left, rightPole: right }],
-    }));
-  };
-
-  const removeConstruct = (id: string) => {
-    setData((d) => {
-      const newRatings = { ...d.ratings };
-      delete newRatings[id];
-      return {
-        ...d,
-        constructs: d.constructs.filter((c) => c.id !== id),
-        ratings: newRatings
-      };
-    });
-  };
-
-  const setRating = (constructId: string, elementId: string, score: number) => {
-    setData((d) => ({
-      ...d,
-      ratings: {
-        ...d.ratings,
-        [constructId]: {
-          ...(d.ratings[constructId] || {}),
-          [elementId]: score,
-        },
-      },
-    }));
-  };
-
-  const resetSession = () => setData(defaultData);
-
   return (
     <SessionContext.Provider
       value={{
         data,
-        setTheme,
-        setMode,
-        addElement,
-        removeElement,
-        addConstruct,
-        removeConstruct,
-        setRating,
-        resetSession,
+        update,
+        replace: setData,
+        persist,
+        setPersist,
+        saveStatus,
+        reset: () => setData(freshSession()),
       }}
     >
       {children}
     </SessionContext.Provider>
   );
 }
-
 export function useSession() {
-  const context = useContext(SessionContext);
-  if (!context) throw new Error("useSession must be used within SessionProvider");
-  return context;
+  const value = useContext(SessionContext);
+  if (!value) throw new Error("Missing session provider");
+  return value;
 }

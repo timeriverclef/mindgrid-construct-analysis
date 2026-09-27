@@ -1,217 +1,392 @@
-import React, { useState, useEffect } from "react";
-import { useSession } from "@/src/SessionContext";
-import { Card, CardContent } from "@/src/components/ui/Card";
-import { Button } from "@/src/components/ui/Button";
-import { Input } from "@/src/components/ui/Input";
+import { useState, useRef, useEffect } from "react";
 import { ArrowLeft, ArrowRight, RefreshCw, Plus, Check } from "lucide-react";
-import { Element } from "@/src/types";
-
-export default function TriadicStep({ onNext, onPrev }: { onNext: () => void; onPrev: () => void }) {
-  const { data, addConstruct, removeConstruct } = useSession();
-  const [triad, setTriad] = useState<Element[]>([]);
-  const [leftPole, setLeftPole] = useState("");
-  const [rightPole, setRightPole] = useState("");
-  const [justAdded, setJustAdded] = useState(false);
-  const [selectedPair, setSelectedPair] = useState<string[]>([]);
-
-  // Pick 3 random unique elements
-  const drawTriad = () => {
-    if (data.elements.length < 3) return;
-    const shuffled = [...data.elements].sort(() => 0.5 - Math.random());
-    setTriad(shuffled.slice(0, 3));
-    setLeftPole("");
-    setRightPole("");
-    setJustAdded(false);
-    setSelectedPair([]);
+import { useSession } from "../../SessionContext";
+import { generateId } from "../../lib/utils";
+import type { Construct } from "../../types";
+import { useConfirm } from "../ConfirmDialog";
+export default function TriadicStep({
+  onNext,
+  onPrev,
+}: {
+  onNext: () => void;
+  onPrev: () => void;
+}) {
+  const { data, update } = useSession();
+  const history = useRef(new Set<string>(data.seenTriads || []));
+  const pick = () => {
+    const combinations: string[][] = [];
+    const es = data.elements;
+    for (let a = 0; a < es.length - 2; a++)
+      for (let b = a + 1; b < es.length - 1; b++)
+        for (let c = b + 1; c < es.length; c++) {
+          const ids = [es[a].id, es[b].id, es[c].id];
+          if (!history.current.has(ids.slice().sort().join("|")))
+            combinations.push(ids);
+        }
+    if (!combinations.length) {
+      history.current.clear();
+      return es.slice(0, 3).map((e) => e.id);
+    }
+    return combinations[Math.floor(Math.random() * combinations.length)];
   };
-
+  const draft =
+    data.triadDraft &&
+    data.triadDraft.ids.every((id) => data.elements.some((e) => e.id === id))
+      ? data.triadDraft
+      : undefined;
+  const [triad, setTriad] = useState(() => draft?.ids || pick()),
+    [pair, setPair] = useState<string[]>(draft?.pair || []),
+    [left, setLeft] = useState(draft?.left || ""),
+    [right, setRight] = useState(draft?.right || ""),
+    [example, setExample] = useState(draft?.example || ""),
+    [editing, setEditing] = useState<string | null>(draft?.editing || null),
+    [message, setMessage] = useState(""),
+    [undo, setUndo] = useState<{ c: Construct; row: any } | null>(null);
   useEffect(() => {
-    if (triad.length === 0) drawTriad();
-  }, [data.elements]);
-
-  const handleAdd = () => {
-    if (leftPole.trim() && rightPole.trim() && selectedPair.length === 2) {
-      addConstruct(leftPole.trim(), rightPole.trim());
-      setJustAdded(true);
-      setTimeout(() => {
-        drawTriad();
-      }, 1000);
-    }
+    update((d) => ({
+      ...d,
+      triadDraft: { ids: triad, pair, left, right, example, editing },
+      seenTriads: [...history.current],
+    }));
+  }, [triad, pair, left, right, example, editing]);
+  const draw = () => {
+    history.current.add(triad.slice().sort().join("|"));
+    setTriad(pick());
+    setPair([]);
+    setLeft("");
+    setRight("");
+    setExample("");
+    setEditing(null);
   };
-
-  const handleToggleSelect = (id: string) => {
-    if (selectedPair.includes(id)) {
-      setSelectedPair(selectedPair.filter(x => x !== id));
-    } else {
-      if (selectedPair.length < 2) {
-        setSelectedPair([...selectedPair, id]);
-      }
+  const ask = useConfirm();
+  const save = async () => {
+    const l = left.trim(),
+      r = right.trim();
+    if (!l || !r || l === r) {
+      setMessage("请用两个不同的描述，表达对你有意义的区别。");
+      return;
     }
+    if (
+      data.constructs.some(
+        (c) =>
+          c.id !== editing &&
+          ((c.leftPole === l && c.rightPole === r) ||
+            (c.leftPole === r && c.rightPole === l)),
+      )
+    ) {
+      setMessage("已有相同或相反顺序的构念，可以继续澄清原有描述。");
+      return;
+    }
+    const previous = data.constructs.find((c) => c.id === editing);
+    const changed =
+      previous && (previous.leftPole !== l || previous.rightPole !== r);
+    if (
+      changed &&
+      Object.keys(data.ratings[editing!] || {}).length &&
+      !(
+        await ask({
+          title: "修改构念含义",
+          message:
+            "这一组已有评分会清除，需要重新评分。其他构念的评分不受影响。",
+          confirmLabel: "修改并重新评分",
+        })
+      ).confirmed
+    )
+      return;
+    update((d) => {
+      const ratings = { ...d.ratings };
+      if (changed) delete ratings[editing!];
+      return {
+        ...d,
+        constructs: editing
+          ? d.constructs.map((c) =>
+              c.id === editing
+                ? { ...c, leftPole: l, rightPole: r, example }
+                : c,
+            )
+          : [
+              ...d.constructs,
+              { id: generateId(), leftPole: l, rightPole: r, example },
+            ],
+        ratings,
+        feedback: {},
+      };
+    });
+    setMessage(
+      editing
+        ? "构念已更新。"
+        : "已记下这组构念。可以继续比较，也可以进入评分。",
+    );
+    draw();
   };
-
+  const edit = (c: Construct) => {
+    setEditing(c.id);
+    setLeft(c.leftPole);
+    setRight(c.rightPole);
+    setExample(c.example || "");
+    setMessage("修改描述会影响它的含义；只修改例子不会清除评分。");
+    window.scrollTo({ top: 0 });
+  };
   return (
-    <div className="space-y-6 animate-in fade-in duration-300">
-      <div className="flex justify-between items-end">
-        <div>
-          <h2 className="text-2xl font-semibold text-slate-900 mb-1">三元对比例举 (Triadic Elicitation)</h2>
-          <p className="text-slate-500">通过随机比较，帮助你发现内心深处评价他人的隐含"标尺"。</p>
-        </div>
-        <div className="text-sm text-slate-500 font-medium bg-white px-3 py-1 rounded-full border border-slate-200">
-          已提取构念: <span className="text-emerald-600 font-bold">{data.constructs.length}</span> (建议 8-15 个)
-        </div>
+    <div className="stack">
+      <div>
+        <div className="eyebrow">没有标准词汇，用你自己的语言</div>
+        <h1>你看见了怎样的区别？</h1>
+        <p className="lead">
+          选出两位有共同点的人，再描述另一位与他们不同的地方。
+        </p>
       </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        <div className="lg:col-span-2 space-y-6">
-          <Card className="border-slate-200 shadow-sm bg-white overflow-hidden relative">
-            {justAdded && (
-              <div className="absolute inset-0 bg-emerald-500/10 backdrop-blur-[2px] z-10 flex items-center justify-center animate-in fade-in duration-300">
-                 <div className="bg-white rounded-full p-3 shadow-lg text-emerald-600 flex items-center font-medium">
-                   <Check className="w-5 h-5 mr-2" />
-                   成功提取一组构念！正在抽取下一组...
-                 </div>
+      <div className="split-layout wide-main">
+        <section className="panel">
+          {editing ? (
+            <div className="notice">
+              正在编辑构念
+              <button className="quiet" onClick={draw}>
+                取消编辑
+              </button>
+            </div>
+          ) : (
+            <>
+              <div className="section-heading">
+                <h2>先选择相似的两位</h2>
+                <span className="small muted">{pair.length} / 2 已选</span>
               </div>
-            )}
-            <CardContent className="p-8">
-              <div className="text-center mb-8">
-                <p className="text-slate-600 font-medium text-lg">
-                  请观察以下三个元素，请先点击<strong className="text-indigo-600">选择其中两个有共同点的元素</strong>：
-                </p>
-              </div>
-
-              <div className="flex flex-col sm:flex-row items-stretch justify-center gap-4 mb-10">
-                {triad.map((el, i) => {
-                  const isSimilar = selectedPair.includes(el.id);
-                  const isDifferent = selectedPair.length === 2 && !isSimilar;
-                  
+              <div className="triad-grid">
+                {triad.map((id) => {
+                  const e = data.elements.find((e) => e.id === id)!;
                   return (
-                    <button 
-                      key={el.id} 
-                      onClick={() => handleToggleSelect(el.id)}
-                      className={`flex-1 w-full flex flex-col items-center justify-center p-6 border-2 rounded-xl text-center transition-all focus:outline-none cursor-pointer duration-300
-                        ${isSimilar ? "border-indigo-500 bg-indigo-50 shadow-md transform scale-105" : 
-                          isDifferent ? "border-rose-400 bg-rose-50 shadow-md scale-95 opacity-80" : 
-                          "border-slate-200 bg-white hover:border-indigo-300 hover:bg-slate-50"}
-                      `}
+                    <button
+                      key={id}
+                      aria-pressed={pair.includes(id)}
+                      className={
+                        "triad-card " + (pair.includes(id) ? "selected" : "")
+                      }
+                      onClick={() =>
+                        setPair((p) =>
+                          p.includes(id)
+                            ? p.filter((x) => x !== id)
+                            : p.length < 2
+                              ? [...p, id]
+                              : [p[0], id],
+                        )
+                      }
                     >
-                      <span className={`font-semibold text-lg transition-colors ${isSimilar ? "text-indigo-800" : isDifferent ? "text-rose-800" : "text-slate-800"}`}>
-                        {el.name}
+                      <span className="triad-icon">
+                        {pair.includes(id) ? <Check size={19} /> : "○"}
                       </span>
-                      {isSimilar && <span className="text-xs font-medium text-indigo-600 mt-2 bg-indigo-100 px-2 py-0.5 rounded-full animate-in zoom-in">相似项</span>}
-                      {isDifferent && <span className="text-xs font-medium text-rose-600 mt-2 bg-rose-100 px-2 py-0.5 rounded-full animate-in zoom-in">不同项</span>}
-                      {!isSimilar && !isDifferent && <span className="text-xs font-medium text-slate-400 mt-2">点击选择</span>}
+                      <strong>{e.name}</strong>
+                      <span>
+                        {pair.includes(id)
+                          ? "相似的一位"
+                          : pair.length === 2
+                            ? "不同的一位"
+                            : "点击选择"}
+                      </span>
                     </button>
                   );
                 })}
               </div>
-
-              <div className={`space-y-6 bg-slate-50 p-6 rounded-xl border border-slate-100 transition-all duration-500 ${selectedPair.length === 2 ? "opacity-100 transform translate-y-0" : "opacity-30 pointer-events-none transform translate-y-4"}`}>
-                {data.mode === 'guided' && (
-                  <div className="mb-4 p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-sm text-emerald-800">
-                    <strong className="block mb-1">💡 引导提示：</strong>
-                    卡壳了吗？试着从这些维度思考他们：<br/>
-                    • 性格：外向/内向，温和/暴躁<br/>
-                    • 价值观：追求安稳/喜欢冒险，利他/利己<br/>
-                    • 情感关系：亲密/疏离，依赖/独立
+              <button
+                className="quiet"
+                onClick={async () => {
+                  if (
+                    (left || right || example) &&
+                    !(
+                      await ask({
+                        title: "换一组人物",
+                        message: "换组会清空尚未记下的构念描述。",
+                        confirmLabel: "换一组",
+                      })
+                    ).confirmed
+                  )
+                    return;
+                  draw();
+                }}
+              >
+                <RefreshCw size={16} />
+                想不到区别？跳过，换一组
+              </button>
+              {data.scenario === "consultation" && (
+                <details className="field">
+                  <summary>咨询师手动选择三位</summary>
+                  <div className="manual-triad">
+                    {triad.map((id, i) => (
+                      <label key={i}>
+                        位置 {i + 1}
+                        <select
+                          value={id}
+                          onChange={(e) => {
+                            const ids = [...triad];
+                            ids[i] = e.target.value;
+                            setTriad(ids);
+                            setPair([]);
+                          }}
+                        >
+                          {data.elements.map((e) => (
+                            <option
+                              key={e.id}
+                              value={e.id}
+                              disabled={triad.includes(e.id) && id !== e.id}
+                            >
+                              {e.name}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    ))}
                   </div>
-                )}
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-slate-700 flex items-center">
-                    <span className="w-6 h-6 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center text-xs mr-2">1</span>
-                    哪两个元素有相似之处？它们的相似特征是（显极）：
-                  </label>
-                  <Input 
-                    value={leftPole}
-                    onChange={e => setLeftPole(e.target.value)}
-                    placeholder="例如：有责任心 / 情感疏离 / 追求成就..." 
-                    className="border-indigo-200 focus-visible:ring-indigo-500"
-                  />
-                </div>
-                
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-slate-700 flex items-center">
-                    <span className="w-6 h-6 rounded-full bg-rose-100 text-rose-700 flex items-center justify-center text-xs mr-2">2</span>
-                    第三个元素与它们有何不同？其相反特征是（隐极）：
-                  </label>
-                  <Input 
-                    value={rightPole}
-                    onChange={e => setRightPole(e.target.value)}
-                    placeholder="例如：逃避责任 / 温暖亲密 / 安于现状..." 
-                    className="border-rose-200 focus-visible:ring-rose-500"
-                  />
-                </div>
-                
-                <div className="flex gap-3 pt-4">
-                  <Button 
-                    variant="outline" 
-                    onClick={drawTriad}
-                    className="flex-1 border-slate-300 text-slate-600 hover:bg-slate-100"
-                  >
-                    <RefreshCw className="w-4 h-4 mr-2" /> 换一组元素
-                  </Button>
-                  <Button 
-                    onClick={handleAdd}
-                    disabled={!leftPole.trim() || !rightPole.trim() || justAdded}
-                    className="flex-1 bg-slate-900 text-white hover:bg-slate-800 shadow-md"
-                  >
-                    <Plus className="w-4 h-4 mr-2" /> 确认此构念
-                  </Button>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-
-        <div>
-           <Card className="border-slate-200 shadow-sm h-full max-h-[600px] flex flex-col">
-            <div className="p-4 border-b border-slate-100 bg-slate-50/50">
-              <h3 className="font-medium text-slate-800">已提取的构念清单</h3>
-            </div>
-            <div className="flex-1 overflow-y-auto p-4 space-y-3">
-              {data.constructs.length === 0 ? (
-                <div className="text-center py-12 text-slate-400 text-sm">
-                  暂无构念。在左侧提取后将显示在此处。
-                </div>
-              ) : (
-                data.constructs.map((c, i) => (
-                  <div key={c.id} className="text-sm p-3 border border-slate-200 rounded-lg hover:border-slate-300 transition-colors group">
-                    <div className="flex justify-between items-start mb-2">
-                      <span className="text-xs text-slate-400">构念 #{i + 1}</span>
-                      <button 
-                        onClick={() => removeConstruct(c.id)}
-                        className="text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"
-                      >
-                        删除
-                      </button>
-                    </div>
-                    <div className="flex justify-between items-center bg-slate-50 p-2 rounded">
-                      <span className="text-indigo-700 font-medium truncate w-[45%] text-right">{c.leftPole}</span>
-                      <span className="text-slate-300 text-xs px-2">VS</span>
-                      <span className="text-rose-700 font-medium truncate w-[45%] text-left">{c.rightPole}</span>
-                    </div>
-                  </div>
-                ))
+                </details>
               )}
+            </>
+          )}
+          <fieldset
+            disabled={!editing && pair.length !== 2}
+            className="construct-fields"
+          >
+            <legend className="sr-only">构念两极与例子</legend>
+            <label>
+              这两位的共同特点
+              <input
+                maxLength={100}
+                value={left}
+                onChange={(e) => setLeft(e.target.value)}
+                placeholder="用你自己的话描述"
+              />
+            </label>
+            <label>
+              另一位与他们不同的特点
+              <input
+                maxLength={100}
+                value={right}
+                onChange={(e) => setRight(e.target.value)}
+                placeholder="不必是字典里的反义词"
+              />
+            </label>
+            <label>
+              一个具体例子（可选）
+              <textarea
+                rows={3}
+                maxLength={2000}
+                value={example}
+                onChange={(e) => setExample(e.target.value)}
+                placeholder="什么情境或行为，让你这样描述？"
+              />
+            </label>
+          </fieldset>
+          {data.mode === "guided" && (
+            <details>
+              <summary>如何把描述说得更清楚</summary>
+              <p>
+                可以回想一次具体相处：他们做了什么？你看重其中什么？两端是否在描述同一个方面？两端都可能有价值，不必把一端写成优点、另一端写成缺点。
+              </p>
+            </details>
+          )}
+          <button
+            className="primary full field"
+            disabled={
+              (!editing && pair.length !== 2) ||
+              !left.trim() ||
+              !right.trim() ||
+              (!editing && data.constructs.length >= 40)
+            }
+            onClick={save}
+          >
+            <Plus size={18} />
+            {editing ? "保存修改" : "记下这组构念"}
+          </button>
+          <p className="small" role="status">
+            {message}
+          </p>
+        </section>
+        <aside className="panel construct-list">
+          <div className="section-heading">
+            <h2>我的构念</h2>
+            <span className="pill">{data.constructs.length} 组</span>
+          </div>
+          {!data.constructs.length && (
+            <div className="empty-state">
+              每个人都有自己的标尺。
+              <br />
+              你发现的区别会收在这里。
             </div>
-           </Card>
-        </div>
+          )}
+          {data.constructs.map((c, i) => (
+            <article className="construct-item" key={c.id}>
+              <span className="eyebrow">
+                构念 {String(i + 1).padStart(2, "0")}
+              </span>
+              <p>
+                <strong>{c.leftPole}</strong>
+                <span className="muted"> ↔ </span>
+                <strong>{c.rightPole}</strong>
+              </p>
+              {c.example && <p className="small muted">{c.example}</p>}
+              <div className="actions">
+                <button
+                  className="quiet"
+                  onClick={() => edit(c)}
+                  aria-label={"编辑构念 " + (i + 1)}
+                >
+                  编辑
+                </button>
+                <button
+                  className="quiet"
+                  onClick={() => {
+                    setUndo({ c, row: data.ratings[c.id] });
+                    if (editing === c.id) draw();
+                    update((d) => {
+                      const ratings = { ...d.ratings };
+                      delete ratings[c.id];
+                      return {
+                        ...d,
+                        constructs: d.constructs.filter((x) => x.id !== c.id),
+                        ratings,
+                        feedback: {},
+                      };
+                    });
+                  }}
+                  aria-label={"移除构念 " + (i + 1)}
+                >
+                  移除
+                </button>
+              </div>
+            </article>
+          ))}
+          {undo && (
+            <button
+              className="secondary full"
+              onClick={() => {
+                update((d) => ({
+                  ...d,
+                  constructs: [...d.constructs, undo.c],
+                  ratings: undo.row
+                    ? { ...d.ratings, [undo.c.id]: undo.row }
+                    : d.ratings,
+                }));
+                setUndo(null);
+              }}
+            >
+              撤销最近一次移除
+            </button>
+          )}
+          <p className="small muted field">
+            可以先用少量构念熟悉流程，再逐步补充。数量本身不保证结果可靠。
+          </p>
+        </aside>
       </div>
-
-      <div className="flex justify-between pt-6 border-t border-slate-200 mt-8">
-        <Button variant="outline" onClick={onPrev}>
-          <ArrowLeft className="w-4 h-4 mr-2" /> 上一步
-        </Button>
-        <Button 
-          onClick={onNext} 
-          disabled={data.constructs.length < 3}
-          className="bg-emerald-600 hover:bg-emerald-700 text-white"
+      <div className="step-footer">
+        <button className="secondary" onClick={onPrev}>
+          <ArrowLeft size={18} />
+          上一步
+        </button>
+        <button
+          className="primary"
+          disabled={!data.constructs.length}
+          onClick={onNext}
         >
-          下一步：网格评分 <ArrowRight className="w-4 h-4 ml-2" />
-        </Button>
+          进入评分 <ArrowRight size={18} />
+        </button>
       </div>
-      {data.constructs.length < 3 && (
-        <p className="text-sm text-center text-amber-600">你需要提取至少 3 组构念才能生成有意义的分析报告哦。（建议提取 8 组以上）</p>
-      )}
     </div>
   );
 }

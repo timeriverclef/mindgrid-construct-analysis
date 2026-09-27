@@ -1,159 +1,261 @@
-import React, { useState } from "react";
-import { useSession } from "@/src/SessionContext";
-import { Card, CardContent } from "@/src/components/ui/Card";
-import { Button } from "@/src/components/ui/Button";
-import { ArrowLeft, ArrowRight, CheckCircle2 } from "lucide-react";
-
-export default function RatingStep({ onNext, onPrev }: { onNext: () => void; onPrev: () => void }) {
-  const { data, setRating } = useSession();
-  const [activeElIdx, setActiveElIdx] = useState(0);
-
-  const elements = data.elements;
-  const constructs = data.constructs;
-  const activeElement = elements[activeElIdx];
-
-  const handleNextElement = () => {
-    setActiveElIdx(Math.min(elements.length - 1, activeElIdx + 1));
-    window.scrollTo({ top: 0, behavior: "smooth" });
+import { useState } from "react";
+import { ArrowLeft, ArrowRight, Check } from "lucide-react";
+import { useSession } from "../../SessionContext";
+import type { Rating } from "../../types";
+export default function RatingStep({
+  onNext,
+  onPrev,
+}: {
+  onNext: () => void;
+  onPrev: () => void;
+}) {
+  const { data, update } = useSession();
+  const [active, setActive] = useState(0),
+    [card, setCard] = useState(0);
+  const element = data.elements[active] || data.elements[0];
+  const answered = (id: string) =>
+    data.constructs.filter((c) => data.ratings[c.id]?.[id] !== undefined)
+      .length;
+  const total = data.elements.length * data.constructs.length,
+    done = data.elements.reduce((n, e) => n + answered(e.id), 0);
+  const rate = (cid: string, value: Rating | undefined) =>
+    update((d) => {
+      const row = { ...d.ratings[cid] };
+      if (value === undefined) delete row[element.id];
+      else row[element.id] = value;
+      return { ...d, ratings: { ...d.ratings, [cid]: row }, feedback: {} };
+    });
+  const missing = () => {
+    for (let i = 0; i < data.elements.length; i++)
+      for (let j = 0; j < data.constructs.length; j++)
+        if (
+          data.ratings[data.constructs[j].id]?.[data.elements[i].id] ===
+          undefined
+        ) {
+          setActive(i);
+          setCard(j);
+          setTimeout(
+            () =>
+              document
+                .getElementById("rating-" + j)
+                ?.scrollIntoView({ block: "center" }),
+            0,
+          );
+          return;
+        }
   };
-
-  const handlePrevElement = () => {
-    setActiveElIdx(Math.max(0, activeElIdx - 1));
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  };
-
-  // Check if current element is fully rated
-  const isElementFullyRated = (elementId: string) => {
-    return constructs.every(c => data.ratings[c.id]?.[elementId] !== undefined);
-  };
-
-  // Check if entire grid is rated
-  const isGridComplete = elements.every(e => isElementFullyRated(e.id));
-
   return (
-    <div className="space-y-6 animate-in fade-in duration-300">
-      <div className="flex justify-between items-end">
-        <div>
-          <h2 className="text-2xl font-semibold text-slate-900 mb-1">网格矩阵评分 (Grid Rating)</h2>
-          <p className="text-slate-500">
-            请基于 1 到 7 分对每一个元素进行评价。1分代表极致符合左侧词，7分代表极致符合右侧词。
-          </p>
-        </div>
+    <div className="stack">
+      <div>
+        <div className="eyebrow">只依据你现在的理解</div>
+        <h1>把你的感受，放在标尺上。</h1>
+        <p className="lead">
+          1 靠近左端，7 靠近右端。4 是中间位置；不了解时，可以如实记录。
+        </p>
       </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
-        {/* Sidebar Nav */}
-        <div className="lg:col-span-1 space-y-2">
-          <h3 className="font-medium text-slate-800 mb-4 px-2">评估对象</h3>
-          {elements.map((el, i) => {
-            const isComplete = isElementFullyRated(el.id);
-            const isActive = i === activeElIdx;
-            
-            return (
+      <div className="progress-row">
+        <span>
+          已回应 {done} / {total} 项
+        </span>
+        <progress value={done} max={total} aria-label="评分完成进度" />
+        <button className="quiet" disabled={done === total} onClick={missing}>
+          定位未评分项
+        </button>
+      </div>
+      <div className="rating-layout">
+        <aside className="panel rating-people">
+          <h2>当前人物</h2>
+          <label className="mobile-person">
+            切换人物
+            <select
+              value={element.id}
+              onChange={(e) => {
+                setActive(
+                  data.elements.findIndex((x) => x.id === e.target.value),
+                );
+                setCard(0);
+              }}
+            >
+              {data.elements.map((e) => (
+                <option key={e.id} value={e.id}>
+                  {e.name} · {answered(e.id)}/{data.constructs.length}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div className="desktop-people">
+            {data.elements.map((e, i) => (
               <button
-                key={el.id}
-                onClick={() => setActiveElIdx(i)}
-                className={`w-full text-left px-4 py-3 rounded-xl text-sm font-medium transition-all flex items-center justify-between
-                  ${isActive ? "bg-slate-900 text-white shadow-md" : "bg-white border hover:bg-slate-50 text-slate-700"}
-                  ${isComplete && !isActive ? "border-emerald-200" : "border-slate-200"}
-                `}
+                key={e.id}
+                className={"person-button " + (i === active ? "selected" : "")}
+                onClick={() => {
+                  setActive(i);
+                  setCard(0);
+                }}
               >
-                <span>{el.name}</span>
-                {isComplete && <CheckCircle2 className={`w-4 h-4 ${isActive ? "text-emerald-400" : "text-emerald-500"}`} />}
+                <span>{e.name}</span>
+                <span className="small">
+                  {answered(e.id) === data.constructs.length ? (
+                    <Check size={17} />
+                  ) : (
+                    answered(e.id) + "/" + data.constructs.length
+                  )}
+                </span>
               </button>
+            ))}
+          </div>
+        </aside>
+        <section className="panel">
+          <div className="section-heading">
+            <h2>{element.name}</h2>
+            <span className="pill">按构念评分</span>
+          </div>
+          <div className="mobile-card-nav">
+            <button
+              className="quiet"
+              disabled={card === 0}
+              onClick={() => setCard((x) => x - 1)}
+            >
+              上一组
+            </button>
+            <span>
+              {card + 1} / {data.constructs.length} 组
+            </span>
+            <button
+              className="quiet"
+              disabled={card === data.constructs.length - 1}
+              onClick={() => setCard((x) => x + 1)}
+            >
+              下一组
+            </button>
+          </div>
+          {data.constructs.map((c, i) => {
+            const value = data.ratings[c.id]?.[element.id];
+            return (
+              <fieldset
+                id={"rating-" + i}
+                key={c.id}
+                className={"rating-card " + (card === i ? "current-card" : "")}
+              >
+                <legend>
+                  <span className="eyebrow">构念 {i + 1}</span>
+                  <span className="rating-poles">
+                    <span>{c.leftPole}</span>
+                    <span className="muted">↔</span>
+                    <span>{c.rightPole}</span>
+                  </span>
+                </legend>
+                {c.example && (
+                  <details className="small">
+                    <summary>回看具体例子</summary>
+                    <p>{c.example}</p>
+                  </details>
+                )}
+                <div className="score-options">
+                  {[1, 2, 3, 4, 5, 6, 7].map((n) => (
+                    <label
+                      key={n}
+                      className={
+                        "score-option " + (value === n ? "chosen" : "")
+                      }
+                    >
+                      <input
+                        type="radio"
+                        name={c.id + "-" + element.id}
+                        value={n}
+                        checked={value === n}
+                        onChange={() => rate(c.id, n)}
+                        aria-label={
+                          n +
+                          " 分，" +
+                          (n < 4
+                            ? "靠近 " + c.leftPole
+                            : n > 4
+                              ? "靠近 " + c.rightPole
+                              : "中间位置")
+                        }
+                      />
+                      <span>{n}</span>
+                    </label>
+                  ))}
+                </div>
+                <div className="scale-captions">
+                  <span>靠近左端</span>
+                  <span>中间位置</span>
+                  <span>靠近右端</span>
+                </div>
+                <div className="rating-extras">
+                  <button
+                    className={
+                      "chip " + (value === "unknown" ? "selected" : "")
+                    }
+                    aria-pressed={value === "unknown"}
+                    onClick={() => rate(c.id, "unknown")}
+                  >
+                    不了解
+                  </button>
+                  <button
+                    className={"chip " + (value === "skip" ? "selected" : "")}
+                    aria-pressed={value === "skip"}
+                    onClick={() => rate(c.id, "skip")}
+                  >
+                    暂不评分
+                  </button>
+                  <button
+                    className="quiet"
+                    disabled={value === undefined}
+                    onClick={() => rate(c.id, undefined)}
+                  >
+                    清除
+                  </button>
+                  <span className="small" role="status">
+                    {value === undefined
+                      ? "尚未评分"
+                      : typeof value === "number"
+                        ? "已选 " + value + " 分"
+                        : value === "unknown"
+                          ? "已记录：不了解"
+                          : "已记录：暂不评分"}
+                  </span>
+                </div>
+              </fieldset>
             );
           })}
-        </div>
-
-        {/* Rating Area */}
-        <div className="lg:col-span-3">
-          <Card className="border-slate-200 shadow-sm bg-white pt-6">
-            <CardContent className="space-y-8">
-              <div className="border-b border-slate-100 pb-4 text-center">
-                <span className="text-sm text-slate-500 mb-1 block">当前评估对象</span>
-                <h3 className="text-2xl font-bold text-slate-900">{activeElement.name}</h3>
-              </div>
-
-              <div className="space-y-10">
-                {constructs.map((c, i) => {
-                  const currentValue = data.ratings[c.id]?.[activeElement.id];
-                  
-                  return (
-                    <div key={c.id} className="space-y-4">
-                       <div className="flex justify-between text-sm font-medium px-2">
-                          <span className="text-indigo-700 w-1/3 text-left line-clamp-2">{c.leftPole}</span>
-                          <span className="text-slate-400 w-1/3 text-center">
-                            {currentValue ? `已选: ${currentValue}` : '未评分'}
-                          </span>
-                          <span className="text-rose-700 w-1/3 text-right line-clamp-2">{c.rightPole}</span>
-                       </div>
-                       
-                       <div className="relative pt-4 pb-2">
-                         <div className="flex justify-between items-center bg-slate-100 p-1.5 rounded-full relative">
-                           {/* Track background line */}
-                           <div className="absolute left-0 right-0 h-1 top-1/2 -translate-y-1/2 bg-gradient-to-r from-indigo-200 via-slate-200 to-rose-200 rounded-full mx-4 pointer-events-none"></div>
-                           
-                           {[1, 2, 3, 4, 5, 6, 7].map(score => {
-                             const isSelected = currentValue === score;
-                             let colorClass = "bg-white text-slate-400 border-slate-200 hover:border-slate-300 hover:bg-slate-50";
-                             
-                             if (isSelected) {
-                               switch (score) {
-                                 case 1: colorClass = "bg-indigo-600 text-white border-indigo-700 shadow-md shadow-indigo-200 scale-110"; break;
-                                 case 2: colorClass = "bg-indigo-500 text-white border-indigo-600 shadow-sm shadow-indigo-100 scale-110"; break;
-                                 case 3: colorClass = "bg-indigo-400 text-white border-indigo-500 shadow-sm shadow-indigo-100 scale-110"; break;
-                                 case 4: colorClass = "bg-slate-500 text-white border-slate-600 shadow-sm shadow-slate-200 scale-110"; break;
-                                 case 5: colorClass = "bg-rose-400 text-white border-rose-500 shadow-sm shadow-rose-100 scale-110"; break;
-                                 case 6: colorClass = "bg-rose-500 text-white border-rose-600 shadow-sm shadow-rose-100 scale-110"; break;
-                                 case 7: colorClass = "bg-rose-600 text-white border-rose-700 shadow-md shadow-rose-200 scale-110"; break;
-                               }
-                             }
-
-                             return (
-                               <button
-                                 key={score}
-                                 onClick={() => setRating(c.id, activeElement.id, score)}
-                                 className={`relative z-10 w-9 h-9 sm:w-10 sm:h-10 rounded-full border-2 flex items-center justify-center text-sm sm:text-base font-bold transition-all duration-200 my-0.5 mx-0.5 ${colorClass}`}
-                               >
-                                 {score}
-                               </button>
-                             );
-                           })}
-                         </div>
-                       </div>
-                    </div>
-                  );
-                })}
-              </div>
-              
-              <div className="pt-8 border-t border-slate-100 flex justify-between">
-                <Button variant="outline" onClick={handlePrevElement} disabled={activeElIdx === 0}>
-                  上一个对象
-                </Button>
-                {activeElIdx < elements.length - 1 ? (
-                  <Button onClick={handleNextElement} className="bg-slate-800 hover:bg-slate-900 text-white">
-                    下一个对象 <ArrowRight className="w-4 h-4 ml-2" />
-                  </Button>
-                ) : (
-                  <Button disabled={!isGridComplete} onClick={onNext} className="bg-emerald-600 hover:bg-emerald-700 text-white">
-                    完成评分并分析 <ArrowRight className="w-4 h-4 ml-2" />
-                  </Button>
-                )}
-              </div>
-            </CardContent>
-          </Card>
-        </div>
+          <div className="panel-bottom">
+            <button
+              className="secondary"
+              disabled={active === 0}
+              onClick={() => {
+                setActive((x) => x - 1);
+                setCard(0);
+              }}
+            >
+              上一位
+            </button>
+            <button
+              className="secondary"
+              disabled={active === data.elements.length - 1}
+              onClick={() => {
+                setActive((x) => x + 1);
+                setCard(0);
+              }}
+            >
+              下一位 <ArrowRight size={17} />
+            </button>
+          </div>
+        </section>
       </div>
-
-      <div className="flex justify-between pt-6 border-t border-slate-200 mt-8">
-        <Button variant="outline" onClick={onPrev}>
-          <ArrowLeft className="w-4 h-4 mr-2" /> 重新提取构念
-        </Button>
-        <span className="text-sm text-slate-500 flex items-center">
-          {isGridComplete ? (
-            <span className="text-emerald-600 font-medium flex items-center"><CheckCircle2 className="w-4 h-4 mr-1"/> 所有项已评分</span>
-          ) : "部分表格尚未评分，请检查侧边栏。您可以随意切换但必须全部填完才能分析。"}
-        </span>
+      <p className="small muted">
+        不了解、暂不评分与未评分均不参与数值计算。你可以先回看已有结果；数据不足时会明确提示。
+      </p>
+      <div className="step-footer">
+        <button className="secondary" onClick={onPrev}>
+          <ArrowLeft size={18} />
+          修改构念
+        </button>
+        <button className="primary" onClick={onNext}>
+          回看与行动 <ArrowRight size={18} />
+        </button>
       </div>
     </div>
   );

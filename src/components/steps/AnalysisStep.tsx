@@ -1,382 +1,471 @@
-import React, { useMemo, useRef, useState } from "react";
-import { useSession } from "@/src/SessionContext";
-import { Card, CardContent, CardHeader, CardTitle } from "@/src/components/ui/Card";
-import { Button } from "@/src/components/ui/Button";
-import { ArrowLeft, Download, AlertTriangle, ShieldCheck, Zap, Copy, Check, Activity, Heart, Users } from "lucide-react";
-import { analyzeGrid } from "@/src/lib/utils";
-import html2canvas from "html2canvas";
-import jsPDF from "jspdf";
-
+import { useMemo, useState } from "react";
+import {
+  ArrowLeft,
+  Download,
+  MessageCircle,
+  ArrowRight,
+  Clipboard,
+  BookOpen,
+} from "lucide-react";
+import { useSession } from "../../SessionContext";
+import { analyzeGrid, isScore } from "../../lib/utils";
+import { aiText, downloadReport } from "../../lib/report";
+const fmt = (n: number | null) => (n === null ? "—" : n.toFixed(2));
+const feedbacks = ["符合我的体验", "部分符合", "不符合", "暂不确定"];
 export default function AnalysisStep({ onPrev }: { onPrev: () => void }) {
-  const { data } = useSession();
-  const reportRef = useRef<HTMLDivElement>(null);
-  const [copied, setCopied] = useState(false);
-
-  const { differenceConstructs, consistentConstructs, dilemmas, polarizationRatio, selfEsteemCorrelation, perceivedSocialDistance } = useMemo(() => {
-    return analyzeGrid(data.elements, data.constructs, data.ratings);
-  }, [data]);
-
-  const realSelfId = data.elements.find(e => e.name === "现实自我" || e.name === "Real Self")?.id;
-  const idealSelfId = data.elements.find(e => e.name === "理想自我" || e.name === "Ideal Self")?.id;
-
-  const getConstructById = (id: string) => data.constructs.find(c => c.id === id);
-
-  const handleDownloadPDF = async () => {
-    if (!reportRef.current) return;
-    try {
-      const canvas = await html2canvas(reportRef.current, { scale: 2 });
-      const imgData = canvas.toDataURL("image/png");
-      const pdf = new jsPDF("p", "mm", "a4");
-      const pdfWidth = pdf.internal.pageSize.getWidth();
-      const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
-      
-      pdf.addImage(imgData, "PNG", 0, 0, pdfWidth, pdfHeight);
-      pdf.save(`构念评估报告_${data.theme || "未命名"}.pdf`);
-    } catch (e) {
-      console.error("PDF generation failed", e);
-    }
-  };
-
-  const generateAIPrompt = () => {
-    const elStr = data.elements.map(e => e.name).join(", ");
-    
-    const constructStr = data.constructs.map((c, i) => {
-      const scores = data.elements.map(e => `${e.name}:${data.ratings[c.id]?.[e.id] || '-'}`).join(", ");
-      return `${i + 1}. [${c.leftPole} vs ${c.rightPole}] -> 评分: ${scores}`;
-    }).join("\n");
-
-    const dilemmaStr = dilemmas.length > 0 ? dilemmas.map(d => {
-      const dc = getConstructById(d.differenceConstructId);
-      const cc = getConstructById(d.consistentConstructId);
-      return `- 渴望改变的维度 [${dc?.leftPole}/${dc?.rightPole}] 与 害怕失去的维度 [${cc?.leftPole}/${cc?.rightPole}] 存在强相关 (r=${d.correlation.toFixed(2)})。`;
-    }).join("\n") : "未发现显著的蕴含性困境。";
-
-    const metricsStr = `
-临床宏观指标：
-- 认知极化率 (Polarization): ${(polarizationRatio * 100).toFixed(1)}% (极端评分1或7的比例)
-- 自尊水平评价 (Self-Esteem r): ${selfEsteemCorrelation.toFixed(2)} (现实自我与理想自我的皮尔逊相关系数)
-- 社交孤立感 (Social Distance): ${perceivedSocialDistance.toFixed(2)} (现实自我与他人的平均绝对距离，满分6分)
-`;
-
-    return `请基于以下乔治·凯利(George Kelly)个人构念网络(Repertory Grid)的原始测试数据，为我提供一份深度的心理分析。
-
-测试主题：${data.theme || '未指定'}
-评估元素：${elStr}
-
-构建维度与评分 (1分代表极其靠近左极，7分代表极其靠近右极)：
-${constructStr}
-
-系统识别出的潜在认知冲突（蕴含性困境）：
-${dilemmaStr}
-${metricsStr}
-
-请作为一位资深的个人构念心理治疗师(PCP Therapist)，从以下几个方面为我进行深度解读：
-1. 我的整体认知结构有多僵化（非黑即白）还是灵活？
-2. 我的“现实自我”与“理想自我”之间的距离说明了什么？
-3. 基于那些蕴含性困境，我在意识上渴望做出的改变，到底受到了我潜意识里什么样恐惧的阻碍？
-4. 请给我3条切实可行的临床介入或自我提升建议，打破目前的僵局。`;
-  };
-
-  const handleCopyPrompt = () => {
-    navigator.clipboard.writeText(generateAIPrompt());
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
-
-  if (!realSelfId || !idealSelfId) {
-    return (
-      <div className="text-center py-20 animate-in fade-in">
-        <AlertTriangle className="w-12 h-12 text-amber-500 mx-auto mb-4" />
-        <h2 className="text-xl font-semibold mb-2">缺少核心元素</h2>
-        <p className="text-slate-600 mb-6">必须包含“现实自我”与“理想自我”两个元素才能进行蕴含性困境分析。</p>
-        <Button onClick={onPrev} variant="outline">返回修改元素</Button>
-      </div>
-    );
-  }
-
+  const { data, update } = useSession();
+  const a = useMemo(
+    () =>
+      analyzeGrid(data.elements, data.constructs, data.ratings, data.settings),
+    [data],
+  );
+  const [notes, setNotes] = useState(false),
+    [busy, setBusy] = useState(false),
+    [message, setMessage] = useState(""),
+    [pseudo, setPseudo] = useState(true);
+  const ideal = data.elements.find((e) => e.role === "ideal")!;
+  const prompt = useMemo(() => aiText(data, pseudo), [data, pseudo]);
+  const setting = (key: string, value: number | boolean) =>
+    update((d) => ({
+      ...d,
+      settings: { ...d.settings, [key]: value },
+      feedback: {},
+    }));
   return (
-    <div className="space-y-6 animate-in fade-in duration-300">
-      <div className="flex justify-between items-end">
+    <div className="stack">
+      <div className="report-title">
         <div>
-          <h2 className="text-2xl font-semibold text-slate-900 mb-1">分析报告 (Analysis Report)</h2>
-          <p className="text-slate-500">基于评分矩阵计算的个人心理结构与潜在冲突。</p>
+          <div className="eyebrow">先看见，再一起理解</div>
+          <h1>你的探索，值得慢慢回看。</h1>
+          <p className="lead">{data.theme}</p>
         </div>
-        <Button onClick={handleDownloadPDF} className="bg-indigo-600 hover:bg-indigo-700 text-white shadow-md">
-          <Download className="w-4 h-4 mr-2" /> 下载PDF报告
-        </Button>
+        <button
+          className="primary"
+          disabled={busy}
+          onClick={async () => {
+            setBusy(true);
+            try {
+              await downloadReport(data, notes);
+              setMessage("PDF 已生成，包含原始评分和本次分析规则。");
+            } catch {
+              setMessage("PDF 生成失败，请重试或先导出会话备份。");
+            } finally {
+              setBusy(false);
+            }
+          }}
+        >
+          <Download size={18} />
+          {busy ? "正在生成…" : "下载 PDF"}
+        </button>
       </div>
-
-      <div ref={reportRef} className="space-y-8 bg-white p-2 sm:p-8 rounded-xl">
-        {/* Header inside Report */}
-        <div className="border-b border-slate-200 pb-6 text-center">
-          <h1 className="text-3xl font-bold text-slate-900 tracking-tight">心理结构与认知冲突分析报告</h1>
-          <p className="text-slate-500 mt-2 font-medium">主题：{data.theme || "无主题"}</p>
+      {data.scenario === "consultation" && (
+        <label className="check-label">
+          <input
+            type="checkbox"
+            checked={notes}
+            onChange={(e) => setNotes(e.target.checked)}
+          />
+          本次 PDF 纳入咨询师私人笔记（默认不纳入）
+        </label>
+      )}
+      <p className="small" role="status">
+        {message}
+      </p>
+      <section className="panel soft">
+        <div className="section-heading">
+          <h2>这份记录如何阅读</h2>
+          <span className="pill">
+            {a.valid} / {a.total} 项有效评分
+          </span>
         </div>
-
-        {/* Section 1: 核心构念分类 */}
-        <div className="grid md:grid-cols-2 gap-6">
-          <Card className="border-amber-200 bg-amber-50/30">
-            <CardHeader className="pb-3 border-b border-amber-100">
-              <CardTitle className="text-amber-800 flex items-center text-lg">
-                <AlertTriangle className="w-5 h-5 mr-2" />
-                差异构念 (渴望改变的部分)
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="pt-4 space-y-3">
-              <p className="text-xs text-amber-700 opacity-80 mb-4">这些是你认为现实与理想差距极大的领域（分数差≥3）。</p>
-              {differenceConstructs.map(id => {
-                const c = getConstructById(id);
-                return c ? (
-                  <div key={id} className="bg-white p-3 rounded shadow-sm text-sm font-medium text-slate-800 flex justify-between border border-amber-100">
-                    <span className="text-indigo-600">{c.leftPole}</span>
-                    <span className="text-slate-300 px-2">vs</span>
-                    <span className="text-rose-600">{c.rightPole}</span>
-                  </div>
-                ) : null;
-              })}
-              {differenceConstructs.length === 0 && <p className="text-sm text-slate-500 italic">暂无满足条件的差异构念。</p>}
-            </CardContent>
-          </Card>
-
-          <Card className="border-emerald-200 bg-emerald-50/30">
-            <CardHeader className="pb-3 border-b border-emerald-100">
-              <CardTitle className="text-emerald-800 flex items-center text-lg">
-                <ShieldCheck className="w-5 h-5 mr-2" />
-                一致构念 (满意的核心价值观)
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="pt-4 space-y-3">
-              <p className="text-xs text-emerald-700 opacity-80 mb-4">这些是你认为现实与理想高度一致的领域（分数差≤1）。</p>
-              {consistentConstructs.map(id => {
-                const c = getConstructById(id);
-                return c ? (
-                  <div key={id} className="bg-white p-3 rounded shadow-sm text-sm font-medium text-slate-800 flex justify-between border border-emerald-100">
-                    <span className="text-indigo-600">{c.leftPole}</span>
-                    <span className="text-slate-300 px-2">vs</span>
-                    <span className="text-rose-600">{c.rightPole}</span>
-                  </div>
-                ) : null;
-              })}
-              {consistentConstructs.length === 0 && <p className="text-sm text-slate-500 italic">暂无满足条件的一致构念。</p>}
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Section 2: 蕴含性困境 (IDs) */}
-        <div className="pt-6">
-          <h3 className="text-xl font-bold text-slate-900 mb-6 flex items-center">
-            <Zap className="w-6 h-6 mr-2 text-indigo-500" />
-            核心发现：蕴含性困境 (Implicative Dilemmas)
-          </h3>
-          <p className="text-slate-600 mb-6 leading-relaxed bg-slate-50 p-4 rounded-lg border border-slate-100 text-sm">
-            <strong>潜意识冲突：</strong> 在潜意识的网格中，系统发现如果你试图去实现某些“渴望的改变”（差异构念），在你的深层认知里，这可能会牵连导致你失去某些“珍视的特质”（一致构念）。这种进退两难的链接就是<span className="text-rose-600 font-bold">心理防御和停滞不前的真正原因</span>。
+        <p>
+          这些观察来自你选择的人物、构念与本次评分。它们帮助提出问题，不能证明心理原因，也不用于判断你是否“健康”。
+        </p>
+        {(a.valid < a.total ||
+          data.elements.length < 6 ||
+          data.constructs.length < 3) && (
+          <p className="notice">
+            当前数据较少或存在未评分项，请优先回看原始描述。少量元素产生的相关可能不稳定。
           </p>
-
-          <div className="space-y-6">
-            {dilemmas.length === 0 ? (
-              <div className="text-center p-8 bg-emerald-50 border border-emerald-100 rounded-xl">
-                 <p className="text-emerald-800 font-medium">太棒了！算法未探测到显著的蕴含性困境。</p>
-                 <p className="text-sm text-emerald-600 mt-2">你在实现理想自我的道路上，内心并不存在强烈的自我矛盾与束缚。</p>
-              </div>
-            ) : (
-              dilemmas.map((d, i) => {
-                const dc = getConstructById(d.differenceConstructId);
-                const cc = getConstructById(d.consistentConstructId);
-                if (!dc || !cc) return null;
-
-                // Determine directional logic for text display
-                const dcIdeal = data.ratings[dc.id]?.[idealSelfId] || 4;
-                const ccIdeal = data.ratings[cc.id]?.[idealSelfId] || 4;
-                
-                const dcTargetName = dcIdeal > 4 ? dc.rightPole : (dcIdeal < 4 ? dc.leftPole : "改变");
-                const ccThreatenedName = ccIdeal > 4 ? cc.leftPole : (ccIdeal < 4 ? cc.rightPole : "现有特质"); // If negative corr, it moves away to opposite
-                                
-                return (
-                  <Card key={i} className="border-rose-200 shadow-md transform hover:-translate-y-1 transition-transform">
-                    <CardContent className="p-6">
-                      <div className="flex flex-col md:flex-row items-center justify-between gap-6">
-                        <div className="flex-1 bg-amber-50 p-4 rounded-lg border border-amber-100 text-center w-full">
-                           <span className="text-xs font-bold text-amber-800 uppercase tracking-widest block mb-1">渴望的改变</span>
-                           <span className="text-lg font-semibold text-slate-800">{dcTargetName}</span>
-                        </div>
-                        
-                        <div className="flex flex-col items-center">
-                          <span className="text-rose-500 font-bold text-xs uppercase bg-rose-50 px-2 py-1 rounded border border-rose-100">潜意识挂钩</span>
-                          <div className="w-16 h-1 mt-2 mb-2 bg-gradient-to-r from-amber-400 to-rose-400"></div>
-                          <span className="text-xs text-slate-500 font-mono">r={d.correlation.toFixed(2)}</span>
-                        </div>
-
-                        <div className="flex-1 bg-rose-50 p-4 rounded-lg border border-rose-100 text-center w-full">
-                           <span className="text-xs font-bold text-rose-800 uppercase tracking-widest block mb-1">恐惧沦为</span>
-                           <span className="text-lg font-semibold text-slate-800">{ccThreatenedName}</span>
-                        </div>
-                      </div>
-                      <div className="mt-4 text-sm text-slate-600 bg-slate-50 p-3 rounded border border-slate-100">
-                        <strong>临床解读：</strong> 你的潜意识认为，如果要变得 <strong>"{dcTargetName}"</strong>，就必然会变成 <strong>"{ccThreatenedName}"</strong>。这导致了你在意识上想改变，潜意识却在拼命阻止改变。
-                      </div>
-                    </CardContent>
-                  </Card>
-                );
-              })
-            )}
+        )}
+      </section>
+      <section className="panel">
+        <div className="section-heading">
+          <span className="section-index">01</span>
+          <h2>先记下你自己的发现</h2>
+        </div>
+        <label>
+          哪些描述最贴近你？哪些地方需要重新理解？
+          <textarea
+            rows={3}
+            maxLength={10000}
+            value={data.reflection}
+            onChange={(e) =>
+              update((d) => ({ ...d, reflection: e.target.value }))
+            }
+            placeholder="不必先接受系统的解释。你可以写下例外、疑问或新的发现。"
+          />
+        </label>
+      </section>
+      <section className="panel">
+        <div className="section-heading">
+          <span className="section-index">02</span>
+          <h2>值得核对的联系</h2>
+          <MessageCircle size={21} />
+        </div>
+        <p>
+          当某个想改变的方面，与另一个想保留的方面在评分中有关联时，可以进一步讨论：改变是否让你担心失去什么？
+        </p>
+        {!a.dilemmas.length ? (
+          <div className="empty-state">
+            本次网格与当前规则下，未发现符合条件的联系。
+            <p className="small">
+              这不代表生活中没有矛盾。也可以从你自己的发现继续探索。
+            </p>
           </div>
-        </div>
-        
-        {/* Section 2.5: Macro Metrics */}
-        <div className="pt-8">
-          <h3 className="text-xl font-bold text-slate-900 mb-6 flex items-center">
-            <Activity className="w-6 h-6 mr-2 text-indigo-500" />
-            宏观认知与自我关系指标
-          </h3>
-          <div className="grid md:grid-cols-3 gap-6">
-            <Card className="border-slate-200 shadow-sm hover:border-indigo-200 transition-colors">
-               <CardContent className="p-6">
-                 <div className="flex items-center text-slate-500 mb-2 font-medium">
-                   <Activity className="w-4 h-4 mr-2" /> 认知极化程度
-                 </div>
-                 <div className="text-3xl font-bold text-slate-900 mb-2">{(polarizationRatio * 100).toFixed(1)}<span className="text-lg text-slate-500">%</span></div>
-                 <p className="text-xs text-slate-500">极端打分(1或7分)的比例。</p>
-                 <div className="mt-3 text-xs bg-slate-50 p-2 rounded text-slate-600">
-                    {polarizationRatio > 0.3 ? "你的思维可能存在较强的'非黑即白'倾向，对人或事的评价较为极端。" : (polarizationRatio < 0.1 ? "你的认知非常具有灰度，避免做出绝对的判断。" : "你的认知结构处于适当的弹性范围。")}
-                 </div>
-               </CardContent>
-            </Card>
-
-            <Card className="border-slate-200 shadow-sm hover:border-indigo-200 transition-colors">
-               <CardContent className="p-6">
-                 <div className="flex items-center text-slate-500 mb-2 font-medium">
-                   <Heart className="w-4 h-4 mr-2 text-rose-400" /> 自尊评价系数 (r)
-                 </div>
-                 <div className="text-3xl font-bold text-slate-900 mb-2">{selfEsteemCorrelation.toFixed(2)}</div>
-                 <p className="text-xs text-slate-500">现实与理想自我的相关系数。</p>
-                 <div className="mt-3 text-xs bg-slate-50 p-2 rounded text-slate-600">
-                    {selfEsteemCorrelation > 0.5 ? "现实与理想较为一致，你对当前的自己总体感到满意。" : (selfEsteemCorrelation < 0 ? "理想与现实出现背离，暗示着较强的自我否定。" : "现实与理想存在一定距离，这是成长的良好动力。")}
-                 </div>
-               </CardContent>
-            </Card>
-
-            <Card className="border-slate-200 shadow-sm hover:border-indigo-200 transition-colors">
-               <CardContent className="p-6">
-                 <div className="flex items-center text-slate-500 mb-2 font-medium">
-                   <Users className="w-4 h-4 mr-2 text-emerald-500" /> 感知社交距离
-                 </div>
-                 <div className="text-3xl font-bold text-slate-900 mb-2">{perceivedSocialDistance.toFixed(1)}<span className="text-lg text-slate-500 font-normal"> / 6</span></div>
-                 <p className="text-xs text-slate-500">与他人的平均心理维度差异。</p>
-                 <div className="mt-3 text-xs bg-slate-50 p-2 rounded text-slate-600">
-                    {perceivedSocialDistance > 3.5 ? "感觉自己与周围人存在显著心理差异，可能带有孤独或独特性。" : (perceivedSocialDistance < 1.5 ? "觉得大家基本相似，可能存在边界模糊或高度群体认同感。" : "与他人的心理距离保持在适中、健康的范围。")}
-                 </div>
-               </CardContent>
-            </Card>
-          </div>
-        </div>
-
-        {/* Section 3: 原始矩阵渲染 (Heatmap) */}
-        <div className="pt-8">
-           <h3 className="text-xl font-bold text-slate-900 mb-6">全景构念得分矩阵 (Score Matrix)</h3>
-           <div className="overflow-x-auto rounded-xl border border-slate-200 pt-8 mt-[-2rem] bg-white">
-
-             <table className="w-full text-sm text-left text-slate-600 whitespace-nowrap">
-               <thead className="bg-slate-900 text-white sticky top-0">
-                 <tr>
-                   <th className="px-4 py-3 font-medium">潜在构念 (左界)</th>
-                   <th className="px-4 py-3 font-medium border-r border-slate-700">潜在构念 (右界)</th>
-                   {data.elements.map(e => (
-                     <th key={e.id} className="px-4 py-3 text-center border-r border-slate-700 font-medium font-mono text-[11px] truncate max-w-[80px]">
-                       {e.name}
-                     </th>
-                   ))}
-                 </tr>
-               </thead>
-               <tbody>
-                 {data.constructs.map((c, i) => (
-                   <tr key={c.id} className="border-b border-slate-100 hover:bg-slate-50">
-                     <td className="px-4 py-3 font-medium text-indigo-700">{c.leftPole}</td>
-                     <td className="px-4 py-3 font-medium text-rose-700 border-r border-slate-100">{c.rightPole}</td>
-                     {data.elements.map(e => {
-                       const score = data.ratings[c.id]?.[e.id] || 0;
-                       // Heatmap logic
-                       const intensity = Math.abs(score - 4);
-                       const isHigh = score > 4;
-                       const isLow = score < 4;
-                       
-                       let bgColor = "bg-slate-50";
-                       let textColor = "text-slate-500";
-                       
-                       if (intensity === 3) {
-                         if (isLow) { bgColor = "bg-indigo-500"; textColor = "text-white"; }
-                         if (isHigh) { bgColor = "bg-rose-500"; textColor = "text-white"; }
-                       } else if (intensity === 2) {
-                         if (isLow) { bgColor = "bg-indigo-300"; textColor = "text-indigo-900"; }
-                         if (isHigh) { bgColor = "bg-rose-300"; textColor = "text-rose-900"; }
-                       } else if (intensity === 1) {
-                         if (isLow) { bgColor = "bg-indigo-100 text-indigo-800"; }
-                         if (isHigh) { bgColor = "bg-rose-100 text-rose-800"; }
-                       }
-
-                       return (
-                         <td key={e.id} className="p-0 border-r border-slate-100 text-center relative group">
-                           <div className={`w-full h-full min-h-[44px] flex items-center justify-center font-bold ${bgColor} ${textColor} transition-colors group-hover:ring-2 group-hover:ring-inset group-hover:ring-indigo-400 group-hover:brightness-110 cursor-default`}>
-                             {score || "-"}
-                           </div>
-                           
-                           {score > 0 && (
-                             <div className="absolute opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity duration-200 bg-slate-900 text-white text-xs rounded-lg py-2.5 px-3 z-50 bottom-full left-1/2 transform -translate-x-1/2 mb-1.5 w-max shadow-xl border border-slate-700 min-w-[220px]">
-                                <div className="font-semibold text-indigo-300 border-b border-slate-700 pb-1.5 mb-2 text-center text-sm">{e.name}</div>
-                                <div className="flex justify-between items-center bg-slate-800 rounded p-1.5 mb-2">
-                                  <span className={`w-2/5 text-right line-clamp-2 leading-tight break-words ${score < 4 ? "text-white font-medium" : "text-slate-400"}`}>{c.leftPole}</span>
-                                  <span className="w-1/5 text-center text-slate-500 font-mono text-[10px]">vs</span>
-                                  <span className={`w-2/5 text-left line-clamp-2 leading-tight break-words ${score > 4 ? "text-white font-medium" : "text-slate-400"}`}>{c.rightPole}</span>
-                                </div>
-                                <p className="text-center font-mono text-emerald-400 font-bold bg-slate-950 rounded py-0.5 mt-1 border border-slate-800 tracking-wider">评分 {score}</p>
-                                
-                                <div className="absolute top-full left-1/2 transform -translate-x-1/2 border-[6px] border-transparent border-t-slate-900"></div>
-                             </div>
-                           )}
-                         </td>
-                       );
-                     })}
-                   </tr>
-                 ))}
-               </tbody>
-             </table>
-           </div>
-        </div>
-
-        {/* Section 4: AI 深度分析助手 */}
-        <div className="pt-8">
-           <h3 className="text-xl font-bold text-slate-900 mb-6 flex items-center">
-              AI 深度解读助手
-           </h3>
-           <Card className="border-indigo-200 bg-indigo-50/50">
-             <CardContent className="p-6">
-                <p className="text-sm text-slate-700 mb-4">
-                  如果你觉得以上数据图表难以解读，或者想听听更多临床见解。你可以一键复制系统为你生成的 <strong>【专家级结构化提示词】</strong>，并发送给你常用的 AI（如 ChatGPT、Claude 或 Kimi），让其为你进行深度解读和咨询建议。
-                </p>
-                <div className="relative">
-                  <textarea 
-                    readOnly 
-                    value={generateAIPrompt()} 
-                    className="w-full text-xs font-mono text-slate-600 bg-white p-4 rounded-lg border border-slate-200 h-48 focus:outline-none"
-                  />
-                  <Button 
-                    onClick={handleCopyPrompt} 
-                    className="absolute top-4 right-4 bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm"
-                    size="sm"
-                  >
-                    {copied ? <Check className="w-4 h-4 mr-2" /> : <Copy className="w-4 h-4 mr-2" />}
-                    {copied ? "已复制" : "复制给 AI"}
-                  </Button>
+        ) : (
+          a.dilemmas.map((d, i) => {
+            const dc = data.constructs.find(
+                (c) => c.id === d.differenceConstructId,
+              )!,
+              cc = data.constructs.find(
+                (c) => c.id === d.consistentConstructId,
+              )!;
+            const wanted =
+              (data.ratings[dc.id][ideal.id] as number) > 4
+                ? dc.rightPole
+                : dc.leftPole;
+            const valued =
+              (data.ratings[cc.id][ideal.id] as number) > 4
+                ? cc.rightPole
+                : cc.leftPole;
+            const key = dc.id + "|" + cc.id;
+            return (
+              <article className="dilemma-card" key={key}>
+                <div className="eyebrow">
+                  探索线索 {i + 1} · r = {d.correlation.toFixed(2)} · 有效配对{" "}
+                  {d.n}
                 </div>
-             </CardContent>
-           </Card>
+                <div className="dilemma-poles">
+                  <div>
+                    <span>希望更靠近</span>
+                    <strong>{wanted}</strong>
+                  </div>
+                  <ArrowRight size={20} />
+                  <div>
+                    <span>同时想保留</span>
+                    <strong>{valued}</strong>
+                  </div>
+                </div>
+                <p>
+                  当你更接近「{wanted}」时，你是否担心「{valued}
+                  」会受到影响？也可能存在其他解释。
+                </p>
+                <fieldset className="feedback">
+                  <legend>这条线索符合你的体验吗？</legend>
+                  {feedbacks.map((f) => (
+                    <label
+                      key={f}
+                      className={
+                        "chip " + (data.feedback[key] === f ? "selected" : "")
+                      }
+                    >
+                      <input
+                        type="radio"
+                        name={key}
+                        checked={data.feedback[key] === f}
+                        onChange={() =>
+                          update((s) => ({
+                            ...s,
+                            feedback: { ...s.feedback, [key]: f },
+                          }))
+                        }
+                      />
+                      {f}
+                    </label>
+                  ))}
+                </fieldset>
+              </article>
+            );
+          })
+        )}
+        <p className="small muted">
+          已计算 {a.testedPairs} 个候选构念对；{a.unavailablePairs} 对因少于 3
+          个有效配对或评分无变化而无法计算。相关阈值不是统计显著性或因果证据。
+        </p>
+      </section>
+      <section className="panel">
+        <div className="section-heading">
+          <span className="section-index">03</span>
+          <h2>描述性观察</h2>
         </div>
-
-      </div>
-
-      <div className="flex justify-start pt-6 border-t border-slate-200 mt-8">
-        <Button variant="outline" onClick={onPrev}>
-          <ArrowLeft className="w-4 h-4 mr-2" /> 返回修改评分
-        </Button>
+        <div className="metrics-grid">
+          <div className="metric">
+            <span>自我—理想平均差</span>
+            <strong>
+              {fmt(a.selfDistance)}
+              <small> / 6</small>
+            </strong>
+            <p>{a.selfPairs} 对有效评分的绝对差；越小表示本次评分越接近。</p>
+          </div>
+          <div className="metric">
+            <span>自我—理想评分模式相关</span>
+            <strong>{fmt(a.selfEsteemCorrelation)}</strong>
+            <p>
+              反映评分模式，不等同于自尊。受构念两极编码影响；不用于跨人比较。
+            </p>
+          </div>
+          <div className="metric">
+            <span>端点评分占比</span>
+            <strong>
+              {a.polarizationRatio === null
+                ? "—"
+                : (a.polarizationRatio * 100).toFixed(1)}
+              <small> %</small>
+            </strong>
+            <p>1 或 7 分占有效评分的比例，不能单独推断思维僵化。</p>
+          </div>
+          <div className="metric">
+            <span>自我—其他元素平均差</span>
+            <strong>
+              {fmt(a.perceivedSocialDistance)}
+              <small> / 6</small>
+            </strong>
+            <p>
+              {a.socialPairs} 对有效评分的绝对差；不等同于社交孤立或关系质量。
+            </p>
+          </div>
+        </div>
+        <p className="small muted">“—”表示数据不足或数值无法定义，不等于 0。</p>
+      </section>
+      <section className="panel">
+        <div className="section-heading">
+          <h2>回看完整评分</h2>
+          <button className="quiet" onClick={onPrev}>
+            修改评分
+          </button>
+        </div>
+        <p className="small muted">
+          1 靠近左端 · 4 中间位置 · 7 靠近右端。两端没有预设的好坏。
+        </p>
+        <div
+          className="matrix-scroll"
+          role="region"
+          aria-label="原始评分矩阵，可横向滚动"
+          tabIndex={0}
+        >
+          <table>
+            <caption className="sr-only">各人物在每组构念上的原始评分</caption>
+            <thead>
+              <tr>
+                <th scope="col">构念两极</th>
+                {data.elements.map((e) => (
+                  <th scope="col" key={e.id}>
+                    {e.name}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {data.constructs.map((c) => (
+                <tr key={c.id}>
+                  <th scope="row">
+                    {c.leftPole}
+                    <span className="muted"> ↔ </span>
+                    {c.rightPole}
+                  </th>
+                  {data.elements.map((e) => {
+                    const v = data.ratings[c.id]?.[e.id];
+                    return (
+                      <td
+                        key={e.id}
+                        className={isScore(v) ? "heat heat-" + v : ""}
+                      >
+                        {v === undefined
+                          ? "未评分"
+                          : v === "unknown"
+                            ? "不了解"
+                            : v === "skip"
+                              ? "暂不评分"
+                              : v}
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+      <section className="panel">
+        <div className="section-heading">
+          <span className="section-index">04</span>
+          <h2>把理解带回生活</h2>
+          <span className="pill">可选 · CBT 辅助记录</span>
+        </div>
+        <p>
+          从一个你愿意尝试、负担较小的行动开始。它是一次验证想法的机会，不是必须完成的任务。
+        </p>
+        <div className="action-grid">
+          {Object.entries({
+            situation: ["具体情境", "哪次相处让你想进一步理解自己？"],
+            prediction: [
+              "我的理解与预测",
+              "如果我采取不同做法，我预期会发生什么？",
+            ],
+            emotion: ["情绪和应对", "当时有什么感受？我通常会怎样做？"],
+            value: ["想保留的价值", "尝试改变时，我仍然希望珍惜什么？"],
+            experiment: [
+              "愿意尝试的小行动",
+              "何时、何地、做什么？我会观察什么？",
+            ],
+            review: ["实际结果与复盘", "发生了什么？与预期有什么不同？"],
+          }).map(([key, [title, placeholder]]) => (
+            <label key={key}>
+              {title}
+              <textarea
+                rows={3}
+                maxLength={10000}
+                placeholder={placeholder}
+                value={data.action[key]}
+                onChange={(e) =>
+                  update((d) => ({
+                    ...d,
+                    action: { ...d.action, [key]: e.target.value },
+                  }))
+                }
+              />
+            </label>
+          ))}
+        </div>
+      </section>
+      <details className="panel">
+        <summary>
+          <BookOpen size={18} /> 方法、参数与计算说明
+        </summary>
+        <div className="settings-grid field">
+          <label>
+            一致构念最大差值
+            <select
+              value={data.settings.congruent}
+              onChange={(e) => setting("congruent", +e.target.value)}
+            >
+              {[0, 1, 2].map((v) => (
+                <option
+                  value={v}
+                  key={v}
+                  disabled={v >= data.settings.discrepant}
+                >
+                  {v}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            差异构念最小差值
+            <select
+              value={data.settings.discrepant}
+              onChange={(e) => setting("discrepant", +e.target.value)}
+            >
+              {[1, 2, 3, 4, 5, 6].map((v) => (
+                <option
+                  value={v}
+                  key={v}
+                  disabled={v <= data.settings.congruent}
+                >
+                  {v}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            相关绝对值阈值
+            <select
+              value={data.settings.correlation}
+              onChange={(e) => setting("correlation", +e.target.value)}
+            >
+              {Array.from(new Set([0.35, 0.5, 0.7, data.settings.correlation]))
+                .sort()
+                .map((v) => (
+                  <option value={v} key={v}>
+                    {v}
+                  </option>
+                ))}
+            </select>
+          </label>
+        </div>
+        <label className="check-label">
+          <input
+            type="checkbox"
+            checked={data.settings.excludeSelf}
+            onChange={(e) => setting("excludeSelf", e.target.checked)}
+          />
+          相关计算排除现实自我与理想自我
+        </label>
+        <p className="small">
+          调整评分或参数会清除旧的线索反馈，请重新核对。本版默认沿用原项目差值
+          ≤1、≥3 与
+          |r|≥0.35，作为明确可调的探索规则，不宣称统一临床标准。不同方法与量尺可以采用其他规则。
+        </p>
+        <p className="small">
+          理想评分为 4
+          时不推断偏好方向；自我评分缺失或差值在两个阈值之间时不做两类归属。符合一致条件也不自动等于“核心价值”。当前一致{" "}
+          {a.consistentConstructs.length} 组、差异{" "}
+          {a.differenceConstructs.length} 组、未分类 {a.undifferentiated.length}{" "}
+          组。缺失按有效配对排除；相关不足 3 对或零方差时不计算。
+        </p>
+        <p className="small">
+          方法版本 MindGrid
+          2.0。蕴含方向按差异构念改变方向、一致构念偏好方向和相关符号联合判断。
+        </p>
+        <a
+          href="https://docs.openrepgrid.org/reference/indexDilemma.html"
+          target="_blank"
+          rel="noreferrer"
+        >
+          阅读 OpenRepGrid 方法说明
+        </a>
+      </details>
+      <details className="panel">
+        <summary>
+          <Clipboard size={18} /> 准备给 AI 的讨论材料（可选）
+        </summary>
+        <p>
+          此处只生成可复制的文字，不会自动发送。复制前请检查自由文本中的身份信息。代号替换不等于完全匿名。
+        </p>
+        <label className="check-label">
+          <input
+            type="checkbox"
+            checked={pseudo}
+            onChange={(e) => setPseudo(e.target.checked)}
+          />
+          将人物名称替换成代号
+        </label>
+        <label className="field">
+          预览材料（不含咨询师私人笔记）
+          <textarea rows={10} readOnly value={prompt} />
+        </label>
+        <button
+          className="secondary"
+          onClick={async () => {
+            try {
+              await navigator.clipboard.writeText(prompt);
+              setMessage("讨论材料已复制，请自行决定是否发送给外部 AI。");
+            } catch {
+              setMessage("无法访问剪贴板，请在预览框内手动选择并复制。");
+            }
+          }}
+        >
+          <Clipboard size={17} />
+          复制已预览的材料
+        </button>
+      </details>
+      <div className="step-footer">
+        <button className="secondary" onClick={onPrev}>
+          <ArrowLeft size={18} />
+          返回评分
+        </button>
+        <span className="small muted">可以保存下来，下次继续对话。</span>
       </div>
     </div>
   );
