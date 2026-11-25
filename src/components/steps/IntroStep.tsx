@@ -1,6 +1,6 @@
-import { ArrowRight, UserRound, UsersRound, Leaf } from "lucide-react";
+import { ArrowRight, UserRound, UsersRound, Leaf, FlaskConical } from "lucide-react";
 import { useSession } from "../../SessionContext";
-export default function IntroStep({ onNext }: { onNext: () => void }) {
+export default function IntroStep({ onNext, onDemo }: { onNext: () => void; onDemo?: () => void }) {
   const { data, update } = useSession();
   return (
     <div className="stack">
@@ -17,6 +17,15 @@ export default function IntroStep({ onNext }: { onNext: () => void }) {
           从熟悉的人物出发，发现那些对你重要的区别。
         </p>
       </div>
+      {onDemo && <section className="demo-card" aria-labelledby="demo-card-title">
+        <div className="demo-icon"><FlaskConical size={23} aria-hidden="true" /></div>
+        <div>
+          <div className="eyebrow">第一次打开？</div>
+          <h2 id="demo-card-title">先看看一份做完的心格</h2>
+          <p className="small">用虚构的职场例子看看评分和探索线索，不会动到你的记录。</p>
+        </div>
+        <button className="secondary" onClick={onDemo}>试用案例 <ArrowRight size={17} /></button>
+      </section>}
       <section className="panel">
         <div className="section-heading">
           <span className="section-index">01</span>
@@ -126,7 +135,7 @@ export default function IntroStep({ onNext }: { onNext: () => void }) {
       <details className="method-details">
         <summary>了解方法与数据保存</summary>
         <p>
-          轮流呈现网格法（Repertory
+          构念网格法（Repertory
           Grid）源于乔治·凯利的个人构念心理学。本工具通过人物比较提取两极构念，再以
           1–7 分记录你的理解。三元比较只是提取方式之一，不是测谎或潜意识诊断。
         </p>

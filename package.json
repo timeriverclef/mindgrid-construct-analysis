@@ -10,6 +10,7 @@
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
     "test": "node --import tsx --test src/lib/analysis.test.ts",
+    "test:pwa": "node --test scripts/pwa.test.mjs",
     "start": "node scripts/serve.mjs"
   },
   "dependencies": {

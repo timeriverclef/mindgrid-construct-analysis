@@ -32,25 +32,28 @@ const SessionContext = createContext<{
   saveStatus: string;
   reset: () => void;
 } | null>(null);
-export function SessionProvider({ children }: { children: ReactNode }) {
-  const [boot] = useState(initial),
+export function SessionProvider({ children, demo }: { children: ReactNode; demo?: () => SessionData }) {
+  const [boot] = useState(() => demo
+    ? { data: demo(), persist: false, error: "" }
+    : initial()),
     [data, setData] = useState(boot.data),
     [persist, setPersistValue] = useState(boot.persist);
   const [saveStatus, setSaveStatus] = useState(
-    boot.error || (boot.persist ? "已恢复本地会话" : "本次会话不保留"),
+    demo ? "虚构案例不会保存" : boot.error || (boot.persist ? "已恢复本地会话" : "本次会话不保留"),
   );
   const update = (fn: (d: SessionData) => SessionData) =>
     setData((d) => ({ ...fn(d), updatedAt: new Date().toISOString() }));
   useEffect(() => {
-    if (!persist) return;
+    if (demo || !persist) return;
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
       setSaveStatus("已保存到此浏览器");
     } catch {
       setSaveStatus("本地保存失败，请导出会话备份");
     }
-  }, [data, persist]);
+  }, [data, persist, demo]);
   useEffect(() => {
+    if (demo) return;
     const warn = (e: BeforeUnloadEvent) => {
       if (!persist && (data.theme || data.constructs.length)) {
         e.preventDefault();
@@ -59,8 +62,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     };
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
-  }, [persist, data.theme, data.constructs.length]);
+  }, [persist, data.theme, data.constructs.length, demo]);
   const setPersist = (v: boolean) => {
+    if (demo) return;
     if (!v) {
       try {
         localStorage.removeItem(STORAGE_KEY);
