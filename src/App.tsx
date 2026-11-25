@@ -9,6 +9,8 @@ import {
   ChevronRight,
 } from "lucide-react";
 import { SessionProvider, useSession } from "./SessionContext";
+import AppInstall from "./components/AppInstall";
+import { demoSession } from "./lib/demo";
 import { downloadJSON, parseSession } from "./lib/session";
 import IntroStep from "./components/steps/IntroStep";
 import ElementStep from "./components/steps/ElementStep";
@@ -18,9 +20,9 @@ import AnalysisStep from "./components/steps/AnalysisStep";
 import { ConfirmProvider, useConfirm } from "./components/ConfirmDialog";
 
 const steps = ["探索主题", "选择人物", "发现构念", "细致评分", "回看与行动"];
-function Workspace() {
+function Workspace({ isDemo = false, onDemo }: { isDemo?: boolean; onDemo: () => void }) {
   const ask = useConfirm();
-  const { data, update, replace, persist, setPersist, saveStatus, reset } =
+  const { data, update, replace, persist, setPersist, saveStatus, saveConflict, savePending, reset } =
     useSession();
   const [message, setMessage] = useState(""),
     [notesOpen, setNotesOpen] = useState(false);
@@ -95,6 +97,8 @@ function Workspace() {
         </a>
         <span className="header-caption">个人构念探索</span>
         <div className="header-actions">
+          {isDemo ? <button className="primary" onClick={onDemo}>退出案例</button> : <>
+          <AppInstall />
           <button className="quiet" onClick={() => input.current?.click()}>
             <Upload size={17} />
             <span>导入</span>
@@ -124,6 +128,7 @@ function Workspace() {
             <RotateCcw size={17} />
             <span>新会话</span>
           </button>
+          </>}
         </div>
         <input
           hidden
@@ -158,11 +163,12 @@ function Workspace() {
             <p>你可以慢慢来。</p>
             <span>这里没有标准答案。每一组描述，都由你赋予意义。</span>
           </div>
-          <div className="storage-box">
+          {!isDemo && <div className="storage-box">
             <label className="check-label">
               <input
                 type="checkbox"
                 checked={persist}
+                disabled={savePending || saveConflict}
                 onChange={(e) => setPersist(e.target.checked)}
               />
               在此设备保留进度
@@ -173,7 +179,7 @@ function Workspace() {
             <p className="small muted">
               共用设备建议关闭。浏览器保存未加密；关闭会移除此处副本。跨设备请使用会话备份。
             </p>
-          </div>
+          </div>}
         </aside>
         <main id="main" tabIndex={-1}>
           <div className="workspace-meta no-print">
@@ -184,6 +190,14 @@ function Workspace() {
               {data.scenario === "personal" ? "个人探索" : "咨询协作"}
             </span>
           </div>
+          {!isDemo && saveConflict && <div className="notice save-conflict no-print" role="alert">
+            <div><strong>已暂停本地保存</strong><p>另一窗口更新或移除了浏览器里的记录。此窗口的编辑仍在当前页面，不会覆盖或恢复那份记录。请先备份，再刷新页面读取此浏览器目前的记录。</p></div>
+            <button className="secondary" onClick={exportSession}>备份当前编辑</button>
+          </div>}
+          {isDemo && <div className="notice demo-notice no-print"><div>
+            <strong>虚构案例 · 不会保存</strong>
+            <p>先看「探索线索」，再返回评分改动一项，看看关联会不会变化。退出后回到你原来的会话。</p>
+          </div></div>}
           {message && (
             <div className="notice no-print" role="status">
               {message}
@@ -196,7 +210,7 @@ function Workspace() {
               </button>
             </div>
           )}
-          {data.step === 0 && <IntroStep onNext={() => go(1)} />}
+          {data.step === 0 && <IntroStep onNext={() => go(1)} onDemo={isDemo ? undefined : onDemo} />}
           {data.step === 1 && (
             <ElementStep onNext={() => go(2)} onPrev={() => go(0)} />
           )}
@@ -246,11 +260,23 @@ function Workspace() {
     </div>
   );
 }
+function AppWorkspaces() {
+  const [isDemo, setIsDemo] = useState(false);
+  const toggle = () => {
+    setIsDemo(v => !v);
+    window.scrollTo({ top: 0 });
+    requestAnimationFrame(() => document.getElementById("main")?.focus({ preventScroll: true }));
+  };
+  return isDemo
+    ? <SessionProvider demo={demoSession}><Workspace isDemo onDemo={toggle} /></SessionProvider>
+    : <Workspace onDemo={toggle} />;
+}
+
 export default function App() {
   return (
     <ConfirmProvider>
       <SessionProvider>
-        <Workspace />
+        <AppWorkspaces />
       </SessionProvider>
     </ConfirmProvider>
   );

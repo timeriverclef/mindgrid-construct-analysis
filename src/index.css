@@ -1471,3 +1471,40 @@ tbody th {
     background: white;
   }
 }
+
+/* The install and sample controls share the original palette and tap sizes. */
+body {
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+.app-install ul { list-style: disc; margin: 16px 0 0; padding-inline-start: 22px; }
+.app-install li + li { margin-top: 10px; }
+.app-install-close { display: flex; justify-content: flex-end; margin-top: 18px; }
+.demo-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  padding: 16px 18px;
+  background: var(--sage-pale);
+  border: 1px solid #d8dfd1;
+  border-radius: 16px;
+}
+.demo-icon { display: grid; place-items: center; color: #4e6049; width: 44px; height: 44px; background: var(--paper); border-radius: 12px; }
+.demo-card .eyebrow { color: #4e6049; }
+.demo-card p, .demo-notice p { margin-top: 4px; }
+.demo-notice { border-inline-start: 3px solid var(--sage); }
+@media (max-width: 520px) {
+  .demo-card { grid-template-columns: auto minmax(0, 1fr); }
+  .demo-card button { grid-column: 2; justify-self: start; }
+}
+.clue-evidence { margin-top: 14px; }
+.clue-table-wrap { overflow-x: auto; margin-block: 10px; }
+.clue-table { width: 100%; border-collapse: collapse; font-size: 0.875rem; table-layout: fixed; }
+.clue-table th, .clue-table td { border-bottom: 1px solid var(--line); padding: 7px 8px; text-align: start; overflow-wrap: anywhere; }
+@media (max-width: 360px) {
+  .app-header { padding-inline: 8px; gap: 4px; }
+  .header-actions .quiet { min-width: 40px; }
+}
+.save-conflict { flex-wrap: wrap; }
+.save-conflict > div { flex: 1 1 18rem; min-width: 0; }
+.save-conflict p { margin-top: 4px; }

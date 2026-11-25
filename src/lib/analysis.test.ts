@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { analyzeGrid, pearsonCorrelation, DEFAULT_SETTINGS } from "./utils";
 import { freshSession, parseSession } from "./session";
 import { aiText, reportText } from "./report";
+import { demoSession } from "./demo";
 const elements = [
   { id: "s", name: "我", role: "self" },
   { id: "i", name: "理想", role: "ideal" },
@@ -163,4 +164,15 @@ test("pseudonym replacement applies to names and repeated names in free text", (
   d.reflection = "测试人物甲的表达";
   assert.ok(!aiText(d, true).includes("测试人物甲"));
   assert.ok(aiText(d, true).includes("人物 3"));
+});
+
+test("fictional case is valid, starts on results and shows one inspectable clue", () => {
+  const sample = demoSession();
+  assert.equal(parseSession(JSON.stringify(sample)).step, 4);
+  assert.notEqual(demoSession().id, sample.id);
+  const result = analyzeGrid(sample.elements, sample.constructs, sample.ratings, sample.settings);
+  assert.equal(result.dilemmas.length, 1);
+  const [clue] = result.dilemmas;
+  assert.deepEqual([clue.differenceConstructId,clue.consistentConstructId,clue.n], ["demo_speaking", "demo_listening", 6]);
+  assert.ok(Math.abs(clue.correlation - (-0.718)) < 0.001);
 });

@@ -23,6 +23,7 @@ export default function AnalysisStep({ onPrev }: { onPrev: () => void }) {
     [busy, setBusy] = useState(false),
     [message, setMessage] = useState(""),
     [pseudo, setPseudo] = useState(true);
+  const self = data.elements.find((e) => e.role === "self")!;
   const ideal = data.elements.find((e) => e.role === "ideal")!;
   const prompt = useMemo(() => aiText(data, pseudo), [data, pseudo]);
   const setting = (key: string, value: number | boolean) =>
@@ -140,6 +141,14 @@ export default function AnalysisStep({ onPrev }: { onPrev: () => void }) {
                 ? cc.rightPole
                 : cc.leftPole;
             const key = dc.id + "|" + cc.id;
+            const score = (cid: string, eid: string) => data.ratings[cid]?.[eid];
+            const gap = (cid: string) => Math.abs(
+              (score(cid, self.id) as number) - (score(cid, ideal.id) as number),
+            );
+            const paired = data.elements.filter(e =>
+              (!data.settings.excludeSelf || e.role === "other") &&
+              isScore(score(dc.id, e.id)) && isScore(score(cc.id, e.id)),
+            );
             return (
               <article className="dilemma-card" key={key}>
                 <div className="eyebrow">
@@ -161,6 +170,17 @@ export default function AnalysisStep({ onPrev }: { onPrev: () => void }) {
                   当你更接近「{wanted}」时，你是否担心「{valued}
                   」会受到影响？也可能存在其他解释。
                 </p>
+                <details className="method-details clue-evidence">
+                  <summary>查看这条线索的评分依据</summary>
+                  <p className="small">现实与理想自我的差距：希望改变的构念 {gap(dc.id)} 分，希望保留的构念 {gap(cc.id)} 分。以下是用于计算相关的 {paired.length} 对评分；缺失、不了解和暂不评分不参与计算。</p>
+                  <div className="clue-table-wrap" tabIndex={0} role="region" aria-label="这条线索的配对评分">
+                    <table className="clue-table">
+                      <thead><tr><th scope="col">对象</th><th scope="col">{wanted}所在构念</th><th scope="col">{valued}所在构念</th></tr></thead>
+                      <tbody>{paired.map(e => <tr key={e.id}><th scope="row">{e.name}</th><td>{score(dc.id, e.id)}</td><td>{score(cc.id, e.id)}</td></tr>)}</tbody>
+                    </table>
+                  </div>
+                  <p className="small muted">两列都按各自构念左端 1 分、右端 7 分记录。相关只描述这组评分如何变化，不说明是什么造成的。</p>
+                </details>
                 <fieldset className="feedback">
                   <legend>这条线索符合你的体验吗？</legend>
                   {feedbacks.map((f) => (
