@@ -1,6 +1,6 @@
 // Build-time replacements are generated from verified local build assets.
-const assets = ["assets/html2canvas.esm-QH1iLAAe.js","assets/index-0RY6-8yW.css","assets/index-4QC538r6.js","assets/index.es-A7pcCkpH.js","assets/jspdf.es.min-BgfhptZI.js","assets/purify.es-DBIK8olT.js","icons/app-192.png","icons/app-512.png","icons/apple-touch.png","icons/maskable-512.png","index.html","manifest.webmanifest"];
-const release = "0f97bb9401726962c19b";
+const assets = ["assets/html2canvas.esm-QH1iLAAe.js","assets/index-0RY6-8yW.css","assets/index-Cf6cxq3a.js","assets/index.es-Cnyrq0Dv.js","assets/jspdf.es.min-BXXQzkFW.js","assets/purify.es-DBIK8olT.js","icons/app-192.png","icons/app-512.png","icons/apple-touch.png","icons/maskable-512.png","index.html","manifest.webmanifest"];
+const release = "c877d185dd92ad8e735e";
 const scope = self.registration.scope;
 const prefix = "mindgrid-shell:" + scope + ":";
 const cacheName = prefix + release;
