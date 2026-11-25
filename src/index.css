@@ -1505,3 +1505,6 @@ body {
   .app-header { padding-inline: 8px; gap: 4px; }
   .header-actions .quiet { min-width: 40px; }
 }
+.save-conflict { flex-wrap: wrap; }
+.save-conflict > div { flex: 1 1 18rem; min-width: 0; }
+.save-conflict p { margin-top: 4px; }
